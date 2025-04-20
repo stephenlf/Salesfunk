@@ -1,0 +1,65 @@
+[project]
+name = "salesfunk"
+version = "0.1.0"
+description = "ETL/dataframe toolkit for Salesforce built on top of simple-salesforce"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Stephen Funk", email = "stephenlfunk@gmail.com" }
+]
+requires-python = ">=3.10"
+keywords = ["salesforce", "ETL", "SOQL", "simple-salesforce", "data pipeline", "dataframe"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Intended Audience :: Developers",
+]
+
+dependencies = [
+    "flask>=3.1.0",
+    "requests-oauthlib>=2.0.0",
+    "simple-salesforce>=1.12.6",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.2.3"]
+polars = ["polars>=1.27.1"]
+dev = [
+  "pytest",
+  "ruff",
+  "mypy",
+  "black"
+]
+
+[tool.mypy]
+strict = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "D"]
+ignore = [
+  "D211",  # allow one blank line before class docstrings (D203)
+  "D212",  # allow summary to start on the second line (D213)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src/"]
+
+[tool.uv.sources]
+salesfunk = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "salesfunk",
+]
