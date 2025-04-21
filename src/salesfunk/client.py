@@ -1,7 +1,10 @@
 import logging
 import sys
 import simple_salesforce
+import pandas as pd
 from simple_salesforce import Salesforce
+from typing import Literal
+from pathlib import Path
 from .oauth import OAuthFlow
 from urllib.parse import urlparse
 
@@ -20,7 +23,14 @@ class Salesfunk:
     _connected: bool = False
     _oauth: OAuthFlow
 
-    def __init__(self, instance_url: str = None, instance: str = None, domain: str = None, connect=False, **kwargs):
+    def __init__(
+        self,
+        instance_url: str = None,
+        instance: str = None,
+        domain: str = None,
+        connect=False,
+        **kwargs,
+    ):
         """
         Initialize a SalesFunk client.
 
@@ -56,9 +66,8 @@ class Salesfunk:
 
         self.kwargs = kwargs
         self._connected = False
-        if (connect):
+        if connect:
             self.connect()
-
 
     def connect(self):
         if self.sf:
@@ -71,7 +80,59 @@ class Salesfunk:
         ) as e:
             logger.info(f"Falling back to browser login (OAuth): {e}")
             self._connect_with_web()
-        
+
+    def query(
+        self, query: str = None, file_path: str | Path = None, **kwargs
+    ) -> pd.DataFrame:
+        """
+        Execute a SOQL query and return the results as a pandas DataFrame.
+        Args:
+            query (str): The SOQL query to execute. If provided, this will override the `query` argument.
+            file_path (Path): The path to a file containing the SOQL query. You must provide either a query string or a file path.
+        Returns:
+            pandas.DataFrame: The results of the query.
+        Raises:
+            ValueError: If neither `query` nor `file_path` is provided.
+        """
+        pass
+
+    def query_sosl(self, query: str = None, file_path: Path = None, **kwargs):
+        """
+        Execute a SOSL query and return the results as a pandas DataFrame.
+        Args:
+            query (str): The SOSL query to execute. If provided, this will override the `query` argument.
+            file_path (Path): The path to a file containing the SOSL query. You must provide either a query string or a file path.
+        Returns:
+            pandas.DataFrame: The results of the query.
+        Raises:
+            ValueError: If neither `query` nor `file_path` is provided.
+        """
+        pass
+
+    def load(
+        self,
+        object: str,
+        data: pd.DataFrame,
+        operation: Literal["insert", "update", "upsert", "delete"],
+        batch_size=9500,
+        external_id: str = None,
+    ) -> pd.DataFrame:
+        """
+        Load data into Salesforce using the Bulk API.
+        Args:
+            object (str): The API name of the Salesforce object to load data into.
+            data (pd.DataFrame): The data to load.
+            operation (str): The operation to perform (e.g., "insert", "update", "upsert", "delete").
+            batch_size (int): The size of each batch to send to Salesforce. Defaults to 9500.
+            external_id (str): The name of the external ID field to use for upsert operations. Required if `operation` is "upsert".
+        Returns:
+            pandas.DataFrame: The results of the load operation.
+        Raises:
+            ValueError: If the `operation` is not one of the supported operations.
+            ValueError: If `external_id` is provided but `operation` is not "upsert".
+        """
+        pass
+
     def _connect_with_web(self):
         self._oauth = OAuthFlow(
             instance_url=_to_instance_url(**self.kwargs),
@@ -114,9 +175,9 @@ def _to_instance_url(*_, domain=None, instance=None, instance_url=None):
                 f'Expected `instance_url` to start with "https://". Did you mean to specify `instance`?'
             )
         if parse.path != "":
-            err = "URL path parameters will be stripped from "
-            logger.warning("")
-            print("")
+            err = "URL path parameters will be stripped from instance_url"
+            logger.warning(err)
+            print(err)
         return f"https://{parse.netloc}"
     if instance is not None:
         if not str(parse.netloc).endswith("salesforce.com"):

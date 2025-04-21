@@ -14,6 +14,7 @@ from getpass import getuser
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
+
 class OAuthFlow:
     alias: None
 
@@ -24,7 +25,7 @@ class OAuthFlow:
         alias: str = None,
         salesfunk_path: Path = (Path.home() / ".salesfunk"),
         timeout_sec: int = 120,
-        require_secure_callback = False # Dev mode only. 
+        require_secure_callback=False,  # Dev mode only.
     ):
         if not require_secure_callback:
             os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
@@ -35,7 +36,7 @@ class OAuthFlow:
         self.alias = alias
         self.salesfunk_path = salesfunk_path
         self.timeout_sec = timeout_sec
-        
+
         self._oauth_session: OAuth2Session = None
         self._oauth_token = None
         self._shutdown_trigger = threading.Event()
@@ -93,7 +94,7 @@ class OAuthFlow:
                 auto_refresh_url=self._token_url,
                 auto_refresh_kwargs={"client_id": self._client_id},
                 token_updater=self._save_token,
-                pkce='S256'
+                pkce="S256",
             )
             authorization_url, state = self._oauth_session.authorization_url(
                 self._authorize_url
@@ -118,20 +119,21 @@ class OAuthFlow:
             if shutdown:
                 shutdown()
             return "Login complete! You can close this tab."
-        
+
         @self._app.route("/__shutdown__")
         def shutdown():
-            func = request.environ.get('werkzeug.server.shutdown')
+            func = request.environ.get("werkzeug.server.shutdown")
             if func is None:
-                raise RuntimeError('Not running with the Werkzeug Server')
+                raise RuntimeError("Not running with the Werkzeug Server")
             func()
-            return 'Server shutting down'
+            return "Server shutting down"
 
     def _run(self):
         thread = threading.Thread(
             target=lambda: self._app.run(
                 port=self.port, debug=False, use_reloader=False
-            ), daemon=True
+            ),
+            daemon=True,
         )
         thread.start()
 
@@ -149,7 +151,7 @@ class OAuthFlow:
             raise TimeoutError(err)
 
         requests.get(f"http://localhost:{self.port}/__shutdown__")
-        
+
         return self._oauth_token or self._load_token()
 
     def _save_token(self, token):
