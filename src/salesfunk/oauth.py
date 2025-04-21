@@ -4,13 +4,15 @@ import threading
 import webbrowser
 import sys
 import logging
+import dotenv
+import requests
 from pathlib import Path
 from flask import Flask, request, redirect, session
 from requests_oauthlib import OAuth2Session
 from getpass import getuser
 
 logger = logging.getLogger(__name__)
-
+dotenv.load_dotenv()
 
 class OAuthFlow:
     alias: None
@@ -21,13 +23,18 @@ class OAuthFlow:
         port: int = 5000,
         alias: str = None,
         salesfunk_path: Path = (Path.home() / ".salesfunk"),
+        timeout_sec: int = 120,
+        require_secure_callback = False # Dev mode only. 
     ):
-        self._client_id = os.getenv("SALESFORCE_CLIENT_ID")
+        if not require_secure_callback:
+            os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        self._client_id = os.getenv("SF_CLIENT_ID")
         self._secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key_123456")
         self.port = port
         self.instance_url = instance_url.rstrip("/")
         self.alias = alias
         self.salesfunk_path = salesfunk_path
+        self.timeout_sec = timeout_sec
         
         self._oauth_session: OAuth2Session = None
         self._oauth_token = None
@@ -78,16 +85,18 @@ class OAuthFlow:
     def _setup_routes(self):
         @self._app.route("/login")
         def login():
+            print(self._client_id)
             self._oauth_session = OAuth2Session(
                 self._client_id,
                 redirect_uri=self._redirect_uri,
-                code_challenge_method="S256",
+                # code_challenge_method="S256",
                 auto_refresh_url=self._token_url,
                 auto_refresh_kwargs={"client_id": self._client_id},
                 token_updater=self._save_token,
+                pkce='S256'
             )
             authorization_url, state = self._oauth_session.authorization_url(
-                self.oauth_config["authorize_url"]
+                self._authorize_url
             )
             session["oauth_state"] = state
             print("🔑 Login here:", authorization_url)
@@ -95,8 +104,9 @@ class OAuthFlow:
 
         @self._app.route("/callback")
         def callback():
-            sf = self._oauth_session
-            self._oauth_token = sf.fetch_token(
+            print(self._oauth_session.token)
+            print(self._oauth_session.client_id)
+            self._oauth_token = self._oauth_session.fetch_token(
                 self._token_url,
                 authorization_response=request.url,
                 include_client_id=True,
@@ -104,13 +114,24 @@ class OAuthFlow:
             self._oauth_session.token = self._oauth_token
             self._save_token(self._oauth_token)
             self._shutdown_trigger.set()
+            shutdown = request.environ.get("werkzeug.server.shutdown")
+            if shutdown:
+                shutdown()
             return "Login complete! You can close this tab."
+        
+        @self._app.route("/__shutdown__")
+        def shutdown():
+            func = request.environ.get('werkzeug.server.shutdown')
+            if func is None:
+                raise RuntimeError('Not running with the Werkzeug Server')
+            func()
+            return 'Server shutting down'
 
     def _run(self):
         thread = threading.Thread(
             target=lambda: self._app.run(
                 port=self.port, debug=False, use_reloader=False
-            )
+            ), daemon=True
         )
         thread.start()
 
@@ -119,9 +140,16 @@ class OAuthFlow:
                 "Could not open browser automatically. Please open the login URL manually:",
                 file=sys.stderr,
             )
-            print("   http://localhost:5000/login", file=sys.stderr)
+            print(f"   http://localhost:{self.port}/login", file=sys.stderr)
 
-        self._shutdown_trigger.wait()
+        success = self._shutdown_trigger.wait(timeout=self.timeout_sec)
+        if not success:
+            err = f"OAuth flow timed out after {self.timeout_sec} seconds."
+            logger.error(err)
+            raise TimeoutError(err)
+
+        requests.get(f"http://localhost:{self.port}/__shutdown__")
+        
         return self._oauth_token or self._load_token()
 
     def _save_token(self, token):

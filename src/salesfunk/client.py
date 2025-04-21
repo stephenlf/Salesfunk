@@ -20,7 +20,7 @@ class Salesfunk:
     _connected: bool = False
     _oauth: OAuthFlow
 
-    def __init__(self, connect=False, **kwargs):
+    def __init__(self, instance_url: str = None, instance: str = None, domain: str = None, connect=False, **kwargs):
         """
         Initialize a SalesFunk client.
 
@@ -30,16 +30,18 @@ class Salesfunk:
 
         Keyword Arguments:
             Salesforce Authentication:
-                username (str): Salesforce username
-                password (str): Corresponding password
-                security_token (str): Salesforce security token
-                session_id (str): Pre-authenticated session token
-                instance_url (str): Full Salesforce instance URL (e.g., https://na1.salesforce.com)
-                instance (str): Short instance name (e.g., "na1")
+                username (str): (Optional) Salesforce username
+                password (str): (Optional) Corresponding password
+                security_token (str): (Optional) Salesforce security token
+                session_id (str): (Optional) Pre-authenticated session token
+                instance_url (str): (Optional) Full Salesforce org URL (e.g., https://login.salesforce.com)
+                instance (str): (Optional) Org URL without schema (e.g., "login.salesforce.com")
+                domain (str): (Optional)
 
             SalesFunk OAuth Flow:
                 instance_url (str): (Optional) Override OAuth login URL (e.g., https://login.salesforce.com)
                 instance (str): (Optional) Shortcut for login domains (e.g., "test" for sandbox)
+                domain (str): (Optional) Org domain (e.g. "login", "test", or a custom org domain)
 
             Universal:
                 version (str): API version to use (default: latest supported)
