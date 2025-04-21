@@ -10,29 +10,30 @@ from getpass import getuser
 
 # === Config ===
 CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID")
-REDIRECT_URI = "http://localhost:5000/callback"
-AUTHORIZE_URL = "https://login.salesforce.com/services/oauth2/authorize"
-TOKEN_URL = "https://login.salesforce.com/services/oauth2/token"
 TOKEN_PATH = Path.home() / ".salesfunk" / f"token-{getuser()}.json"
 
 # === Flask App ===
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")
 
+oauth_config = {
+    "authorize_url": "https://login.salesforce.com/services/oauth2/authorize",
+    "token_url": "https://login.salesforce.com/services/oauth2/token",
+    "redirect_url": "http://localhost:5000/callback"
+}
 _oauth_session = None
 _oauth_token = None
 _shutdown_trigger = threading.Event()
-
 
 @app.route("/login")
 def login():
     global _oauth_session
     _oauth_session = OAuth2Session(
         CLIENT_ID,
-        redirect_uri=REDIRECT_URI,
+        redirect_uri=oauth_config['redirect_url'],
         code_challenge_method="S256",  # Enables PKCE
     )
-    authorization_url, state = _oauth_session.authorization_url(AUTHORIZE_URL)
+    authorization_url, state = _oauth_session.authorization_url(oauth_config['authorize_url'])
     session["oauth_state"] = state
     print("🔑 Login here:", authorization_url)
     return redirect(authorization_url)
@@ -43,11 +44,7 @@ def callback():
     global _oauth_token
     sf = _oauth_session
     _oauth_token = sf.fetch_token(
-        TOKEN_URL, authorization_response=request.url, include_client_id=True
-    )
-
-    _oauth_token = sf.fetch_token(
-        TOKEN_URL,
+        oauth_config['token_url'],
         authorization_response=request.url,
         include_client_id=True,  # Required for PKCE
     )
@@ -56,9 +53,13 @@ def callback():
     return "Login complete! You can close this tab."
 
 # === Entry Point for Main Thread ===
-def run_oauth_flow():
+def run_oauth_flow(port: int = 5000, instance_url: str = 'https://login.salesforce.com'):
+    instance_url = instance_url.removesuffix('/')
+    oauth_config['authorize_url'] = f'{instance_url}/services/oauth2/authorize'
+    oauth_config['token_url'] = f'{instance_url}/services/oauth2/token'
+    oauth_config['redirect_url'] = f'"http://localhost:{port}/callback"'
     thread = threading.Thread(
-        target=lambda: app.run(port=5000, debug=False, use_reloader=False)
+        target=lambda: app.run(port=port, debug=False, use_reloader=False)
     )
     thread.start()
 
@@ -83,15 +84,6 @@ def load_token():
         with open(TOKEN_PATH) as f:
             return json.load(f)
     return None
-
-
-# def check_token_permissions():
-#     if os.name != "nt":  # Unix-only
-#         mode = os.stat(TOKEN_PATH).st_mode
-#         if mode & 0o077:
-#             print("⚠️ Token file permissions are too open. Consider running:")
-#             print(f"   chmod 600 {TOKEN_PATH}")
-
 
 def delete_token() -> bool:
     """

@@ -1,13 +1,13 @@
-import urllib.parse
-import urllib.request
+import logging
+import sys
+import simple_salesforce
 from simple_salesforce import Salesforce
-import subprocess
-import re
-import urllib
-from typing import Optional
+from .oauth import run_oauth_flow
+from urllib.parse import urlparse
 
+logger = logging.getLogger(__name__)
 
-class Salesfunk(Salesforce):
+class Salesfunk:
     """
     Salesforce read/write client. Internally, this class calls the Salesforce
     REST and Bulk APIs for you. It handles batching, error handling, logging,
@@ -15,67 +15,94 @@ class Salesfunk(Salesforce):
     DataFrame.
     """
 
-    def __init__(self, cli_org_alias: Optional[str], **kwargs):
+    sf: Salesforce = None
+    _connected: bool = False
+    
+    def __init__(self, **kwargs):
         """
-        Create a new Salesfunk client. Internally, grabs
+        Initialize a SalesFunk client.
 
-        Args:
-            - cli_org_alias (str): If specified, will attempt to connect to
-            Salesforce by calling the [`sf`](https://developer.salesforce.com/tools/salesforcecli)
-            cli.
+        You may either:
+        - Provide credentials for direct login (e.g., username/password/security_token), or
+        - Provide nothing and use the OAuth browser flow via `connect()`.
 
-            - **kwargs: get passed to the `simple_salesforce.Salesforce`
-            constructor if `org_alias` is not specified.
+        Keyword Arguments:
+            Salesforce Authentication:
+                username (str): Salesforce username
+                password (str): Corresponding password
+                security_token (str): Salesforce security token
+                session_id (str): Pre-authenticated session token
+                instance_url (str): Full Salesforce instance URL (e.g., https://na1.salesforce.com)
+                instance (str): Short instance name (e.g., "na1")
+
+            SalesFunk OAuth Flow:
+                instance_url (str): (Optional) Override OAuth login URL (e.g., https://login.salesforce.com)
+                instance (str): (Optional) Shortcut for login domains (e.g., "test" for sandbox)
+
+            Universal:
+                version (str): API version to use (default: latest supported)
+                proxies (dict): Proxy mapping for HTTP requests
+                session (requests.Session): Custom requests session
+
+        Notes:
+            If login with credentials fails or is not provided, the client
+            will fall back to browser-based OAuth authentication on first call to `.connect()`.
         """
-        if cli_org_alias:
-            session_id, instance_url = _get_session_id(cli_org_alias)
-            kwargs["session_id"] = session_id
-            kwargs["instance_url"] = instance_url
-        super(**kwargs)
+        
+        self.kwargs = kwargs
+        self._connected = False
+        try:
+            self._connect_with_kwargs()
+        except (simple_salesforce.exceptions.SalesforceAuthenticationFailed, TypeError) as e:
+            logger.info(f'Falling back to browser login (OAuth): {e}')
+            self._connect_with_web()
+    
+    def _connect_with_web(self):
+        token = run_oauth_flow(_to_instance_url(**self.kwargs))
+        self.sf = Salesforce(
+            session_id=token["access_token"],
+            instance_url=token["instance_url"]
+        )
+    
+    def _connect_with_kwargs(self):
+        self.sf = Salesforce(**self.kwargs)
 
-    def connect(self, org_url: str = "https://login.salesforce.com/"):
-        """
-        Connects this instance to
-        """
-        pass
-
-
-from collections import namedtuple
-
-SessionId = namedtuple("SessionId", ["session_id", "instance_url"])
-
-
-def _get_session_id(org_alias: str | None):
+def _to_instance_url(*_, domain = None, instance = None, instance_url = None):
     """
-    Runs cli command `sf org open --url-only [-o {org_alias}]` and scrapes for
-    a session ID.
-
+    Validates and transforms kwargs into an instance URL. If no args are passed,
+    defaults to "https://login.salesforce.com". Preferentially uses the value of
+    `instance_url`, then `instance`, then `domain`.
+    
     Args:
-        org_alias (str | None): org alias or org URL to sign into
+        domain (str, optional): Instance domain, e.g. "test" or "login".
+        instance (str, optional): Instance url without the schema, e.g. "login.salesforce.com".
+        instance_url (str, optional): Instance url, e.g. "https://login.salesforce.com".
+
+    Raises:
+        ValueError: If the supplied 
 
     Returns:
-        session_id, host: The session ID
+        str: instance url formatted as "https://{domain}.salesforce.com"
     """
-    cmd_args = [
-        "sf",
-        "org",
-        "open",
-        "--url-only",
-    ]
-    if org_alias:
-        cmd_args.append("-o")
-        cmd_args.append(str(org_alias))
-    pipe = subprocess.run(cmd_args, capture_output=True)
-    assert pipe.returncode == 0
-    pipe = pipe.stdout.decode("utf-8")
-    # Strip control characters
-    pipe = "".join(i for i in pipe if 31 < ord(i) < 127)
-    # Remove ansi color codes
-    pipe = re.sub(r"\[[0-9]{1,2}m", "", pipe)
-    words = [word for word in pipe.split() if word.startswith("https://")]
-    assert len(words) == 1
-    url = urllib.parse.urlparse(words[0])
-    instance_url = url.hostname
-    query = urllib.parse.parse_qs(url.query)
-    session_id = query["sid"][0]
-    return SessionId(session_id=session_id, instance_url=instance_url)
+    if instance_url is not None:
+        parse = urlparse(instance_url)
+        if not str(parse.netloc).endswith('salesforce.com'):
+            raise ValueError(f'Expected `instance_url` to end in ".salesforce.com", got {parse.netloc}')
+        if not str(parse.scheme) == 'https':
+            raise ValueError(f'Expected `instance_url` to start with "https://". Did you mean to specify `instance`?')
+        if parse.path != '':
+            err = 'URL path parameters will be stripped from '
+            logger.warning('')
+            print('')
+        return f"https://{parse.netloc}"
+    if instance is not None:
+        if not str(parse.netloc).endswith('salesforce.com'):
+            raise ValueError(f'Expected `instance` to end in ".salesforce.com", got {instance}')
+        return f"https://{instance}"
+    if domain is not None:
+        if ':' in domain:
+            raise ValueError('Unexpected value in `domain`: ":"')
+        if '/' in domain:
+            raise ValueError('Unexpected value in `domain`: "/"')
+        return f"https://{domain}.salesforce.com"
+    return 'https://login.salesforce.com'
