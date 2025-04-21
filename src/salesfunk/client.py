@@ -20,7 +20,7 @@ class Salesfunk:
     _connected: bool = False
     _oauth: OAuthFlow
 
-    def __init__(self, **kwargs):
+    def __init__(self, connect=False, **kwargs):
         """
         Initialize a SalesFunk client.
 
@@ -45,6 +45,7 @@ class Salesfunk:
                 version (str): API version to use (default: latest supported)
                 proxies (dict): Proxy mapping for HTTP requests
                 session (requests.Session): Custom requests session
+                connect (bool): Eagerly connect at instantiation, without explicitly calling `.connect()` first
 
         Notes:
             If login with credentials fails or is not provided, the client
@@ -53,6 +54,13 @@ class Salesfunk:
 
         self.kwargs = kwargs
         self._connected = False
+        if (connect):
+            self.connect()
+
+
+    def connect(self):
+        if self.sf:
+            return
         try:
             self._connect_with_kwargs()
         except (
@@ -61,7 +69,7 @@ class Salesfunk:
         ) as e:
             logger.info(f"Falling back to browser login (OAuth): {e}")
             self._connect_with_web()
-
+        
     def _connect_with_web(self):
         self._oauth = OAuthFlow(
             instance_url=_to_instance_url(**self.kwargs),
