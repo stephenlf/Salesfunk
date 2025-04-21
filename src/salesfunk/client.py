@@ -2,7 +2,7 @@ import logging
 import sys
 import simple_salesforce
 from simple_salesforce import Salesforce
-from .oauth import run_oauth_flow
+from .oauth import OAuthFlow
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ class Salesfunk:
 
     sf: Salesforce = None
     _connected: bool = False
+    _oauth: OAuthFlow
     
     def __init__(self, **kwargs):
         """
@@ -58,7 +59,8 @@ class Salesfunk:
             self._connect_with_web()
     
     def _connect_with_web(self):
-        token = run_oauth_flow(_to_instance_url(**self.kwargs))
+        self._oauth = OAuthFlow(instance_url=_to_instance_url(**self.kwargs), port=self.kwargs.get('port', 5000))
+        token = self._oauth.get_token()
         self.sf = Salesforce(
             session_id=token["access_token"],
             instance_url=token["instance_url"]

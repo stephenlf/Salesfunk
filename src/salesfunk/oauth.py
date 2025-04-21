@@ -3,97 +3,132 @@ import json
 import threading
 import webbrowser
 import sys
+import logging
 from pathlib import Path
 from flask import Flask, request, redirect, session
 from requests_oauthlib import OAuth2Session
 from getpass import getuser
 
-# === Config ===
-CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID")
-TOKEN_PATH = Path.home() / ".salesfunk" / f"token-{getuser()}.json"
+logger = logging.getLogger(__name__)
 
-# === Flask App ===
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")
+class OAuthFlow:
+    alias: None
+    def __init__(self, instance_url: str = "https://login.salesforce.com", port: int = 5000, alias: str = None):
+        self._client_id = os.getenv('SALESFORCE_CLIENT_ID')
+        self._secret_key = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123456')
+        self.port = port
+        self.instance_url = instance_url.rstrip('/')
+        self.alias = alias
+        
+        self._oauth_session: OAuth2Session = None
+        self._oauth_token = None
+        self._shutdown_trigger = threading.Event()
+        
+        self._app = Flask(__name__)
+        self._app.secret_key = self._secret_key
+        self._setup_routes()
+        
+    def get_token(self):
+        token = self._load_token() or self._run()
+        return token
+    
+    def refresh_token(self):
+        token = self._load_token()
+        if not token or "refresh_token" not in token:
+            raise RuntimeError("No refresh token available. Please re-authenticate.")
+        self._oauth_session.token = token
+        new_token = self._oauth_session.refresh_token(self._token_url, refresh_token=token["refresh_token"])
+        self._save_token(new_token)
+        self._oauth_token = new_token
+        logger.info("Salesforce token refreshed.")
+        return new_token
+            
+            
+    @property
+    def _redirect_uri(self):
+        return f'http://localhost:{self.port}/callback'
+    
+    @property
+    def _login_uri(self):
+        return f'http://localhost:{self.port}/login'
+    
+    @property
+    def _authorize_url(self):
+        return f"{self.instance_url}/services/oauth2/authorize"
 
-oauth_config = {
-    "authorize_url": "https://login.salesforce.com/services/oauth2/authorize",
-    "token_url": "https://login.salesforce.com/services/oauth2/token",
-    "redirect_url": "http://localhost:5000/callback"
-}
-_oauth_session = None
-_oauth_token = None
-_shutdown_trigger = threading.Event()
+    @property
+    def _token_url(self):
+        return f"{self.instance_url}/services/oauth2/token"
+    
+    @property
+    def token_path(self):
+        connection_identifier = self.alias or self.instance_url.removeprefix('https://')
+        return Path.home() / ".salesfunk" / f"token-{connection_identifier}.json"
 
-@app.route("/login")
-def login():
-    global _oauth_session
-    _oauth_session = OAuth2Session(
-        CLIENT_ID,
-        redirect_uri=oauth_config['redirect_url'],
-        code_challenge_method="S256",  # Enables PKCE
-    )
-    authorization_url, state = _oauth_session.authorization_url(oauth_config['authorize_url'])
-    session["oauth_state"] = state
-    print("🔑 Login here:", authorization_url)
-    return redirect(authorization_url)
+    def _setup_routes(self):
+        @self._app.route('/login')
+        def login():
+            self._oauth_session = OAuth2Session(
+                self._client_id,
+                redirect_uri=self._redirect_uri,
+                code_challenge_method='S256',
+                auto_refresh_url=self._token_url,
+                auto_refresh_kwargs={'client_id': self._client_id},
+                token_updater=self._save_token
+            )
+            authorization_url, state = self._oauth_session.authorization_url(self.oauth_config['authorize_url'])
+            session['oauth_state'] = state
+            print("🔑 Login here:", authorization_url)
+            return redirect(authorization_url)
+        
+        @self._app.route('/callback')
+        def callback():
+            sf = self._oauth_session
+            self._oauth_token = sf.fetch_token(
+                self._token_url,
+                authorization_response=request.url,
+                include_client_id=True
+            )
+            self._oauth_session.token = self._oauth_token
+            self._save_token(self._oauth_token)
+            self._shutdown_trigger.set()
+            return 'Login complete! You can close this tab.'
+    
+    def _run(self):
+        thread = threading.Thread(
+            target=lambda: self._app.run(port=self.port, debug=False, use_reloader=False)
+        )
+        thread.start()
+        
+        if not webbrowser.open(f'http://localhost:{self.port}/login', new=1):
+            print("Could not open browser automatically. Please open the login URL manually:", file=sys.stderr)
+            print("   http://localhost:5000/login", file=sys.stderr)
+        
+        self._shutdown_trigger.wait()
+        return self._oauth_token or self._load_token()
+    
+    def _save_token(self, token):
+        self._oauth_token = token
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.token_path, "w") as f:
+            json.dump(token, f)
+        os.chmod(self.token_path, 0o600)
 
+    def _load_token(self):
+        if self._oauth_token:
+            return self._oauth_token
+        if self.token_path.exists():
+            with open(self.token_path) as f:
+                return json.load(f)
+        return None
 
-@app.route("/callback")
-def callback():
-    global _oauth_token
-    sf = _oauth_session
-    _oauth_token = sf.fetch_token(
-        oauth_config['token_url'],
-        authorization_response=request.url,
-        include_client_id=True,  # Required for PKCE
-    )
-    save_token(_oauth_token)
-    _shutdown_trigger.set()
-    return "Login complete! You can close this tab."
-
-# === Entry Point for Main Thread ===
-def run_oauth_flow(port: int = 5000, instance_url: str = 'https://login.salesforce.com'):
-    instance_url = instance_url.removesuffix('/')
-    oauth_config['authorize_url'] = f'{instance_url}/services/oauth2/authorize'
-    oauth_config['token_url'] = f'{instance_url}/services/oauth2/token'
-    oauth_config['redirect_url'] = f'"http://localhost:{port}/callback"'
-    thread = threading.Thread(
-        target=lambda: app.run(port=port, debug=False, use_reloader=False)
-    )
-    thread.start()
-
-    if not webbrowser.open(url="http://localhost:5000/login", new=1):
-        print("⚠️ Could not open browser automatically. Please open the login URL manually:", file=sys.stderr)
-        print("   http://localhost:5000/login", file=sys.stderr)
-    _shutdown_trigger.wait()
-    return _oauth_token or load_token()
-
-
-# === Token Utilities ===
-def save_token(token):
-    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(TOKEN_PATH, "w") as f:
-        json.dump(token, f)
-
-    os.chmod(TOKEN_PATH, 0o600)
-
-
-def load_token():
-    if TOKEN_PATH.exists():
-        with open(TOKEN_PATH) as f:
-            return json.load(f)
-    return None
-
-def delete_token() -> bool:
-    """
-    Delete the salesforce session token.
-
-    Returns:
-        bool: `True` if the token existed, `False` if it didn't.
-    """
-    if TOKEN_PATH.exists():
-        TOKEN_PATH.unlink()
-        print("🧹 Token deleted successfully.")
-    else:
-        print("ℹ️ No token found to delete.")
+    def _delete_token(self) -> bool:
+        if self._oauth_token:
+            del self._oauth_token
+        if self.token_path.exists():
+            self.token_path.unlink()
+            logger.info("Token deleted successfully.")
+            return True
+        else:
+            logger.info("No token found to delete.")
+            return False
