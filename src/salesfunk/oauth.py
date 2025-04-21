@@ -11,47 +11,57 @@ from getpass import getuser
 
 logger = logging.getLogger(__name__)
 
+
 class OAuthFlow:
     alias: None
-    def __init__(self, instance_url: str = "https://login.salesforce.com", port: int = 5000, alias: str = None):
-        self._client_id = os.getenv('SALESFORCE_CLIENT_ID')
-        self._secret_key = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123456')
+
+    def __init__(
+        self,
+        instance_url: str = "https://login.salesforce.com",
+        port: int = 5000,
+        alias: str = None,
+        salesfunk_path: Path = (Path.home() / ".salesfunk"),
+    ):
+        self._client_id = os.getenv("SALESFORCE_CLIENT_ID")
+        self._secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key_123456")
         self.port = port
-        self.instance_url = instance_url.rstrip('/')
+        self.instance_url = instance_url.rstrip("/")
         self.alias = alias
+        self.salesfunk_path = salesfunk_path
         
         self._oauth_session: OAuth2Session = None
         self._oauth_token = None
         self._shutdown_trigger = threading.Event()
-        
+
         self._app = Flask(__name__)
         self._app.secret_key = self._secret_key
         self._setup_routes()
-        
+
     def get_token(self):
         token = self._load_token() or self._run()
         return token
-    
+
     def refresh_token(self):
         token = self._load_token()
         if not token or "refresh_token" not in token:
             raise RuntimeError("No refresh token available. Please re-authenticate.")
         self._oauth_session.token = token
-        new_token = self._oauth_session.refresh_token(self._token_url, refresh_token=token["refresh_token"])
+        new_token = self._oauth_session.refresh_token(
+            self._token_url, refresh_token=token["refresh_token"]
+        )
         self._save_token(new_token)
         self._oauth_token = new_token
         logger.info("Salesforce token refreshed.")
         return new_token
-            
-            
+
     @property
     def _redirect_uri(self):
-        return f'http://localhost:{self.port}/callback'
-    
+        return f"http://localhost:{self.port}/callback"
+
     @property
     def _login_uri(self):
-        return f'http://localhost:{self.port}/login'
-    
+        return f"http://localhost:{self.port}/login"
+
     @property
     def _authorize_url(self):
         return f"{self.instance_url}/services/oauth2/authorize"
@@ -59,54 +69,61 @@ class OAuthFlow:
     @property
     def _token_url(self):
         return f"{self.instance_url}/services/oauth2/token"
-    
+
     @property
     def token_path(self):
-        connection_identifier = self.alias or self.instance_url.removeprefix('https://')
-        return Path.home() / ".salesfunk" / f"token-{connection_identifier}.json"
+        connection_identifier = self.alias or self.instance_url.removeprefix("https://")
+        return self.salesfunk_path / f"token-{connection_identifier}.json"
 
     def _setup_routes(self):
-        @self._app.route('/login')
+        @self._app.route("/login")
         def login():
             self._oauth_session = OAuth2Session(
                 self._client_id,
                 redirect_uri=self._redirect_uri,
-                code_challenge_method='S256',
+                code_challenge_method="S256",
                 auto_refresh_url=self._token_url,
-                auto_refresh_kwargs={'client_id': self._client_id},
-                token_updater=self._save_token
+                auto_refresh_kwargs={"client_id": self._client_id},
+                token_updater=self._save_token,
             )
-            authorization_url, state = self._oauth_session.authorization_url(self.oauth_config['authorize_url'])
-            session['oauth_state'] = state
+            authorization_url, state = self._oauth_session.authorization_url(
+                self.oauth_config["authorize_url"]
+            )
+            session["oauth_state"] = state
             print("🔑 Login here:", authorization_url)
             return redirect(authorization_url)
-        
-        @self._app.route('/callback')
+
+        @self._app.route("/callback")
         def callback():
             sf = self._oauth_session
             self._oauth_token = sf.fetch_token(
                 self._token_url,
                 authorization_response=request.url,
-                include_client_id=True
+                include_client_id=True,
             )
             self._oauth_session.token = self._oauth_token
             self._save_token(self._oauth_token)
             self._shutdown_trigger.set()
-            return 'Login complete! You can close this tab.'
-    
+            return "Login complete! You can close this tab."
+
     def _run(self):
         thread = threading.Thread(
-            target=lambda: self._app.run(port=self.port, debug=False, use_reloader=False)
+            target=lambda: self._app.run(
+                port=self.port, debug=False, use_reloader=False
+            )
         )
         thread.start()
-        
-        if not webbrowser.open(f'http://localhost:{self.port}/login', new=1):
-            print("Could not open browser automatically. Please open the login URL manually:", file=sys.stderr)
+
+        if not webbrowser.open(f"http://localhost:{self.port}/login", new=1):
+            print(
+                "Could not open browser automatically. Please open the login URL manually:",
+                file=sys.stderr,
+            )
             print("   http://localhost:5000/login", file=sys.stderr)
-        
+
         self._shutdown_trigger.wait()
         return self._oauth_token or self._load_token()
-    
+
     def _save_token(self, token):
         self._oauth_token = token
         self.token_path.parent.mkdir(parents=True, exist_ok=True)

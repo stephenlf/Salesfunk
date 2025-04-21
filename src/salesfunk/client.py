@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+
 class Salesfunk:
     """
     Salesforce read/write client. Internally, this class calls the Salesforce
@@ -18,7 +19,7 @@ class Salesfunk:
     sf: Salesforce = None
     _connected: bool = False
     _oauth: OAuthFlow
-    
+
     def __init__(self, **kwargs):
         """
         Initialize a SalesFunk client.
@@ -49,62 +50,74 @@ class Salesfunk:
             If login with credentials fails or is not provided, the client
             will fall back to browser-based OAuth authentication on first call to `.connect()`.
         """
-        
+
         self.kwargs = kwargs
         self._connected = False
         try:
             self._connect_with_kwargs()
-        except (simple_salesforce.exceptions.SalesforceAuthenticationFailed, TypeError) as e:
-            logger.info(f'Falling back to browser login (OAuth): {e}')
+        except (
+            simple_salesforce.exceptions.SalesforceAuthenticationFailed,
+            TypeError,
+        ) as e:
+            logger.info(f"Falling back to browser login (OAuth): {e}")
             self._connect_with_web()
-    
+
     def _connect_with_web(self):
-        self._oauth = OAuthFlow(instance_url=_to_instance_url(**self.kwargs), port=self.kwargs.get('port', 5000))
+        self._oauth = OAuthFlow(
+            instance_url=_to_instance_url(**self.kwargs),
+            port=self.kwargs.get("port", 5000),
+        )
         token = self._oauth.get_token()
         self.sf = Salesforce(
-            session_id=token["access_token"],
-            instance_url=token["instance_url"]
+            session_id=token["access_token"], instance_url=token["instance_url"]
         )
-    
+
     def _connect_with_kwargs(self):
         self.sf = Salesforce(**self.kwargs)
 
-def _to_instance_url(*_, domain = None, instance = None, instance_url = None):
+
+def _to_instance_url(*_, domain=None, instance=None, instance_url=None):
     """
     Validates and transforms kwargs into an instance URL. If no args are passed,
     defaults to "https://login.salesforce.com". Preferentially uses the value of
     `instance_url`, then `instance`, then `domain`.
-    
+
     Args:
         domain (str, optional): Instance domain, e.g. "test" or "login".
         instance (str, optional): Instance url without the schema, e.g. "login.salesforce.com".
         instance_url (str, optional): Instance url, e.g. "https://login.salesforce.com".
 
     Raises:
-        ValueError: If the supplied 
+        ValueError: If the supplied
 
     Returns:
         str: instance url formatted as "https://{domain}.salesforce.com"
     """
     if instance_url is not None:
         parse = urlparse(instance_url)
-        if not str(parse.netloc).endswith('salesforce.com'):
-            raise ValueError(f'Expected `instance_url` to end in ".salesforce.com", got {parse.netloc}')
-        if not str(parse.scheme) == 'https':
-            raise ValueError(f'Expected `instance_url` to start with "https://". Did you mean to specify `instance`?')
-        if parse.path != '':
-            err = 'URL path parameters will be stripped from '
-            logger.warning('')
-            print('')
+        if not str(parse.netloc).endswith("salesforce.com"):
+            raise ValueError(
+                f'Expected `instance_url` to end in ".salesforce.com", got {parse.netloc}'
+            )
+        if not str(parse.scheme) == "https":
+            raise ValueError(
+                f'Expected `instance_url` to start with "https://". Did you mean to specify `instance`?'
+            )
+        if parse.path != "":
+            err = "URL path parameters will be stripped from "
+            logger.warning("")
+            print("")
         return f"https://{parse.netloc}"
     if instance is not None:
-        if not str(parse.netloc).endswith('salesforce.com'):
-            raise ValueError(f'Expected `instance` to end in ".salesforce.com", got {instance}')
+        if not str(parse.netloc).endswith("salesforce.com"):
+            raise ValueError(
+                f'Expected `instance` to end in ".salesforce.com", got {instance}'
+            )
         return f"https://{instance}"
     if domain is not None:
-        if ':' in domain:
+        if ":" in domain:
             raise ValueError('Unexpected value in `domain`: ":"')
-        if '/' in domain:
+        if "/" in domain:
             raise ValueError('Unexpected value in `domain`: "/"')
         return f"https://{domain}.salesforce.com"
-    return 'https://login.salesforce.com'
+    return "https://login.salesforce.com"
