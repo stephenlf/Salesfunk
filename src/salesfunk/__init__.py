@@ -1,1 +1,1 @@
-from .client import Salesfunk
+from .oauth import OAuthFlow

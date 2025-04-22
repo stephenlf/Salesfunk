@@ -9,7 +9,6 @@ import requests
 from pathlib import Path
 from flask import Flask, request, redirect, session
 from requests_oauthlib import OAuth2Session
-from getpass import getuser
 
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -24,9 +23,24 @@ class OAuthFlow:
         alias: str = None,
         salesfunk_path: Path = (Path.home() / ".salesfunk"),
         timeout_sec: int = 120,
-        require_secure_callback=False,  # Dev mode only.
+        require_secure_callback=True,  # Dev mode only.
     ):
+        """
+        Create a new OAuthFlow client. Use this to sign into Salesforce with a browser-based flow,
+        much like you would with the `sf` CLI.
+
+        Args:
+            instance_url (str, optional): Instance URL. Defaults to "https://login.salesforce.com".
+            port (int, optional): Port to serve the auth server on. Defaults to 5000.
+            alias (str, optional): Alias for your org. Allows you to have multiple active connections at once. Defaults to None.
+            salesfunk_path (str, optional): Path to store your access tokens. Must be secured. Defaults to (Path.home() / ".salesfunk").
+            timeout_sec (int, optional): Amount of time you have to complete the OAuth flow before it times out. Defaults to 120.
+            require_secure_callback (bool, optional): If False, the OAuth server won't require HTTPs comms. For dev only.. Defaults to True.
+        """
         if not require_secure_callback:
+            err = 'https:// transport should be required, except in limit, dev environments'
+            print(err, sys.stderr)
+            logger.warning(err)
             os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
         self._client_id = os.getenv("SF_CLIENT_ID")
         self._secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key_123456")
@@ -44,7 +58,7 @@ class OAuthFlow:
         self._app.secret_key = self._secret_key
         self._setup_routes()
 
-    def get_token(self):
+    def _get_token(self):
         token = self._load_token() or self._run()
         return token
 
@@ -63,11 +77,11 @@ class OAuthFlow:
 
     @property
     def session_id(self):
-        return self.get_token()['access_token']
+        return self._get_token()['access_token']
     
     @property
     def instance_url(self):
-        return self.get_token()['instance_url']
+        return self._get_token()['instance_url']
 
     @property
     def _redirect_uri(self):
