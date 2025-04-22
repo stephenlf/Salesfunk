@@ -14,7 +14,6 @@ from getpass import getuser
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
-
 class OAuthFlow:
     alias: None
 
@@ -61,6 +60,14 @@ class OAuthFlow:
         self._oauth_token = new_token
         logger.info("Salesforce token refreshed.")
         return new_token
+
+    @property
+    def session_id(self):
+        return self.get_token()['access_token']
+    
+    @property
+    def instance_url(self):
+        return self.get_token()['instance_url']
 
     @property
     def _redirect_uri(self):

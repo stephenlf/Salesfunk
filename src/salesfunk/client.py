@@ -82,101 +82,6 @@ class Salesfunk:
             logger.info(f"Falling back to browser login (OAuth): {e}")
             self._connect_with_web()
 
-    def select(
-        self, soql: str = None, file_path: str | Path = None, **kwargs
-    ) -> pd.DataFrame:
-        """
-        Execute a SOQL query and return the results as a pandas DataFrame.
-        Args:
-            soql (str): The SOQL query to execute. If provided, this will override the `file_path` argument.
-            file_path (Path): The path to a file containing the SOQL query. You must provide either a query string or a file path.
-            kwargs: Additional keyword arguments to pass to the Salesforce REST API.
-        Returns:
-            pandas.DataFrame: The results of the query.
-        Raises:
-            ValueError: If neither `query` nor `file_path` is provided.
-        """
-        if not soql and not file_path:
-            raise ValueError("You must provide either a `soql` query or a `file_path`.")
-        if file_path and not soql:
-            with open(file_path, "r") as f:
-                soql = f.read()
-        soql = ' '.join(line.strip() for line in soql.splitlines())
-        response = self.sf.query_all(soql, **kwargs)
-        return _to_dataframe(response)
-
-    def find(self, sosl: str = None, file_path: Path = None):
-        """
-        Execute a SOSL query and return the results as a pandas DataFrame.
-        Args:
-            sosl (str): The SOSL query to execute. If provided, this will override the `query` argument.
-            file_path (Path): The path to a file containing the SOSL query. You must provide either a query string or a file path.
-            kwargs: Additional keyword arguments to pass to the Salesforce REST API.
-        Returns:
-            pandas.DataFrame: The results of the query.
-        Raises:
-            ValueError: If neither `query` nor `file_path` is provided.
-        """
-        if not sosl and not file_path:
-            raise ValueError("You must provide either a `soql` query or a `file_path`.")
-        if file_path and not sosl:
-            with open(file_path, "r") as f:
-                sosl = f.read()
-        sosl = ' '.join(line.strip() for line in sosl.splitlines())
-        return _to_dataframe(self.sf.search(sosl))
-
-    def load(
-        self,
-        object: str,
-        data: pd.DataFrame,
-        operation: Literal["insert", "update", "upsert", "delete"],
-        batch_size=9500,
-        external_id: str = None,
-        max_workers: int = 4,
-        **kwargs,
-    ) -> pd.DataFrame:
-        """
-        Load data into Salesforce using the Bulk API.
-        Args:
-            object (str): The API name of the Salesforce object to load data into.
-            data (pd.DataFrame): The data to load.
-            operation (str): The operation to perform (e.g., "insert", "update", "upsert", "delete").
-            batch_size (int): The size of each batch to send to Salesforce. Defaults to 9500.
-            external_id (str): The name of the external ID field to use for upsert operations. Required if `operation` is "upsert".
-            max_workers (int): The maximum number of worker threads to use for parallel processing. Defaults to 4.
-            kwargs: Additional keyword arguments to pass to the Salesforce Bulk API.
-        Returns:
-            pandas.DataFrame: The results of the load operation.
-        Raises:
-            ValueError: If the `operation` is not one of the supported operations.
-            ValueError: If `external_id` is provided but `operation` is not "upsert".
-        """
-        chunks = _chunk(data, batch_size)
-
-        # Create job
-
-        # try: ... except KeyboardInterrupt: ...{abort job https://developer.salesforce.com/docs/atlas.en-us.api_asynch.meta/api_asynch/abort_job.htm}...
-        results = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                #executor.submit(self._process_chunk, job, chunk): chunk for chunk in chunks  # POST each job
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                results.append(result)
-        
-        # Close bulk job
-        # ...
-
-        return pd.concat(results, ignore_index=True)
-
-    def _bulk_load(self):
-        """
-        Load data to Salesforce using the Bulk API 2.0.
-        """
-        pass
-
-
     def _connect_with_web(self):
         self._oauth = OAuthFlow(
             instance_url=_to_instance_url(**self.kwargs),
@@ -189,9 +94,6 @@ class Salesfunk:
 
     def _connect_with_kwargs(self):
         self.sf = Salesforce(**self.kwargs)
-    
-    #def _process_chunk():
-
 
 def _to_instance_url(*_, domain=None, instance=None, instance_url=None):
     """
@@ -238,23 +140,3 @@ def _to_instance_url(*_, domain=None, instance=None, instance_url=None):
             raise ValueError('Unexpected value in `domain`: "/"')
         return f"https://{domain}.salesforce.com"
     return "https://login.salesforce.com"
-
-def _to_dataframe(results) -> pd.DataFrame:
-    '''Turn the response from sf_query_all and turn it into a dataframe'''
-    records = results['records']
-    for record in records:
-        if 'attributes' in record:
-            del record['attributes']
-    return pd.DataFrame(records)
-
-def _chunk(data: pd.DataFrame, batch_size: int):
-    """
-    Yield successive n-sized chunks from data.
-    Args:
-        data (pd.DataFrame): The data to chunk.
-        batch_size (int): The size of each chunk.
-    Yields:
-        pd.DataFrame: A chunk of the data.
-    """
-    for i in range(0, len(data), batch_size):
-        yield data.iloc[i:i + batch_size]
