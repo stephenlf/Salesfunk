@@ -22,9 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "dotenv>=0.9.9",
     "requests-oauthlib>=2.0.0",
-    "simple-salesforce>=1.12.6",
 ]
 
 [project.optional-dependencies]
@@ -60,5 +58,4 @@ dev = [
     "marimo[recommended]>=0.13.0",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
-    "salesfunk",
 ]
