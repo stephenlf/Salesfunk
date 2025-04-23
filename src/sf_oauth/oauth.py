@@ -14,7 +14,7 @@ from requests_oauthlib import OAuth2Session
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
-class OAuthFlow:
+class OAuthClient:
     alias: None
 
     def __init__(
@@ -27,7 +27,7 @@ class OAuthFlow:
         refresh_interval_mili: float = 3600 * 1000,  # 1 hour, configurable in the Salesforce connected app
     ):
         """
-        Create a new OAuthFlow client. Use this to sign into Salesforce with a browser-based flow,
+        Create a new OAuthClient. Use this to sign into Salesforce with a browser-based flow,
         much like you would with the `sf` CLI.
 
         Args:
