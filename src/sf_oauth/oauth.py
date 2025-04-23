@@ -20,10 +20,11 @@ class OAuthFlow:
     def __init__(
         self,
         instance_url: str = "https://login.salesforce.com",
+        callback_url: str = "http://localhost",
         port: int = 5000,
         alias: str = None,
         token_storage_path: Path = (Path.home() / ".sf-oauth"),
-        client_id: str = os.getenv("SF_CLIENT_ID"),
+        client_id: str = os.getenv("SF_OAUTH_CLIENT_ID"),
         refresh_interval_mili: float = 3600 * 1000,  # 1 hour, configurable in the Salesforce connected app
     ):
         """
@@ -39,6 +40,7 @@ class OAuthFlow:
             refresh_interval_mili (float, optional): Amount of time before an access token expires and should be refreshed. Defaults to 1 hr.
         """
         self._client_id = client_id
+        self.callback_url = callback_url
         self.port = port
         self._instance_url = instance_url.rstrip("/")
         self.alias = alias
@@ -72,7 +74,7 @@ class OAuthFlow:
     def disconnect(self):
         self._delete_token()
         del self._oauth_token
-        
+    
     @property
     def session_id(self):
         return self._get_token()['access_token']
@@ -83,11 +85,7 @@ class OAuthFlow:
 
     @property
     def _redirect_uri(self):
-        return f"http://localhost:{self.port}/callback"
-
-    @property
-    def _login_uri(self):
-        return f"http://localhost:{self.port}/login"
+        return f"{self.callback_url}:{self.port}/callback"
 
     @property
     def _authorize_url(self):
@@ -106,8 +104,10 @@ class OAuthFlow:
         authorization_url, state = self._oauth_session.authorization_url(
             self._authorize_url
         )
-        print("🔑 Login here:", authorization_url)
-        webbrowser.open(authorization_url, new=1)
+        try:
+            webbrowser.open(authorization_url, new=1)
+        except:
+            print("🔑 Login here:", authorization_url)
     
         # Start one-shot HTTP server to handle the callback
         class CallbackHandler(BaseHTTPRequestHandler):
@@ -201,3 +201,6 @@ class OAuthFlow:
         else:
             logger.info("No token found to delete.")
             return False
+
+def _to_instance_url(domain: str = None, instance: str = None, instance_url: str = None):
+    pass
