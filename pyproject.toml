@@ -1,14 +1,14 @@
 [project]
 name = "sf_oauth"
 version = "0.1.0"
-description = "ETL/dataframe toolkit for Salesforce built on top of simple-salesforce"
+description = "A simple OAuth client Salesforce. Connect notebooks or CLIs with a browser-based flow."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
   { name = "Stephen Funk", email = "stephenlfunk@gmail.com" }
 ]
 requires-python = ">=3.10"
-keywords = ["salesforce", "ETL", "SOQL", "simple-salesforce", "data pipeline", "dataframe"]
+keywords = ["salesforce", "SOQL", "simple-salesforce", "oauth", "notebook"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
