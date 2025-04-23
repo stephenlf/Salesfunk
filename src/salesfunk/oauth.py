@@ -2,14 +2,14 @@ import os
 import json
 import threading
 import webbrowser
-import sys
 import logging
 import dotenv
-import requests
+from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from requests_oauthlib import OAuth2Session
+
 
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -23,8 +23,8 @@ class OAuthFlow:
         port: int = 5000,
         alias: str = None,
         salesfunk_path: Path = (Path.home() / ".salesfunk"),
-        timeout_sec: int = 120,
-        require_secure_callback=True,  # Dev mode only.
+        client_id: str = os.getenv("SF_CLIENT_ID"),
+        refresh_interval_mili: float = 3600 * 1000,  # 1 hour, configurable in the Salesforce connected app
     ):
         """
         Create a new OAuthFlow client. Use this to sign into Salesforce with a browser-based flow,
@@ -35,51 +35,51 @@ class OAuthFlow:
             port (int, optional): Port to serve the auth server on. Defaults to 5000.
             alias (str, optional): Alias for your org. Allows you to have multiple active connections at once. Defaults to None.
             salesfunk_path (str, optional): Path to store your access tokens. Must be secured. Defaults to (Path.home() / ".salesfunk").
-            timeout_sec (int, optional): Amount of time you have to complete the OAuth flow before it times out. Defaults to 120.
-            require_secure_callback (bool, optional): If False, the OAuth server won't require HTTPs comms. For dev only.. Defaults to True.
+            client_id (str, optional): Consumer Key for External Client App in Salesforce. Defaults to env var `SF_CLIENT_ID`
+            refresh_interval_mili (float, optional): Amount of time before an access token expires and should be refreshed. Defaults to 1 hr.
         """
-        if not require_secure_callback:
-            err = 'https:// transport should be required, except in limit, dev environments'
-            print(err, sys.stderr)
-            logger.warning(err)
-            os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-        self._client_id = os.getenv("SF_CLIENT_ID")
+        self._client_id = client_id
         self.port = port
         self._instance_url = instance_url.rstrip("/")
         self.alias = alias
         self.salesfunk_path = salesfunk_path
-        self.timeout_sec = timeout_sec
+        self.refresh_interval_mili = refresh_interval_mili
 
-        self._oauth_session: OAuth2Session = None
+        self._oauth_session: OAuth2Session = OAuth2Session(
+            self._client_id,
+            redirect_uri=self._redirect_uri,
+            auto_refresh_url=self._token_url,
+            auto_refresh_kwargs={"client_id": self._client_id},
+            token_updater=self._save_token,
+            pkce="S256",
+        )
         self._oauth_token = None
         self._shutdown_trigger = threading.Event()
 
-    def refresh_token(self):
-        token = self._load_token()
-        if not token or "refresh_token" not in token:
-            raise RuntimeError("No refresh token available. Please re-authenticate.")
-        self._oauth_session.token = token
-        new_token = self._oauth_session.refresh_token(
-            self._token_url, refresh_token=token["refresh_token"]
-        )
-        self._save_token(new_token)
-        self._oauth_token = new_token
-        logger.info("Salesforce token refreshed.")
-        return new_token
-    
     def connect(self):
-        if not self._oauth_token:
-            self._run()
-        else:
-            print('Already connected')
-
+        token = self._load_token()
+        if not token:
+            return self._run()
+        # Check if token is stale and refresh if necessary
+        now_mili = datetime.now().timestamp() * 1000
+        if 'issued_at' in token and now_mili - int(token['issued_at']) > self.refresh_interval_mili:
+            token = self._refresh_token(token)
+            
+    def reconnect(self):
+        self._delete_token()
+        self.connect()
+        
+    def disconnect(self):
+        self._delete_token()
+        del self._oauth_token
+        
     @property
     def session_id(self):
-        return self.get_token()['access_token']
+        return self._get_token()['access_token']
     
     @property
     def instance_url(self):
-        return self.get_token()['instance_url']
+        return self._get_token()['instance_url']
 
     @property
     def _redirect_uri(self):
@@ -102,19 +102,7 @@ class OAuthFlow:
         connection_identifier = self.alias or self._instance_url.removeprefix("https://")
         return self.salesfunk_path / f"token-{connection_identifier}.json"
 
-    def get_token(self):
-        token = self._load_token() or self._run()
-        return token
-
     def _run(self):
-        self._oauth_session = OAuth2Session(
-            self._client_id,
-            redirect_uri=self._redirect_uri,
-            auto_refresh_url=self._token_url,
-            auto_refresh_kwargs={"client_id": self._client_id},
-            token_updater=self._save_token,
-            pkce="S256",
-        )
         authorization_url, state = self._oauth_session.authorization_url(
             self._authorize_url
         )
@@ -173,77 +161,8 @@ class OAuthFlow:
         
         return self._oauth_token
 
-        # thread = threading.Thread(
-        #     target=lambda: self._app.run(
-        #         port=self.port, debug=False, use_reloader=False
-        #     ),
-        #     daemon=True,
-        # )
-        # thread.start()
-
-        # if not webbrowser.open(f"http://localhost:{self.port}/login", new=1):
-        #     print(
-        #         "Could not open browser automatically. Please open the login URL manually:",
-        #         file=sys.stderr,
-        #     )
-        #     print(f"   http://localhost:{self.port}/login", file=sys.stderr)
-
-        # success = self._shutdown_trigger.wait(timeout=self.timeout_sec)
-        # if not success:
-        #     err = f"OAuth flow timed out after {self.timeout_sec} seconds."
-        #     logger.error(err)
-        #     raise TimeoutError(err)
-
-        # requests.get(f"http://localhost:{self.port}/__shutdown__")
-
-        # return self._oauth_token or self._load_token()
-
-    # def _setup_routes(self):
-    #     @self._app.route("/login")
-    #     def login():
-    #         print(self._client_id)
-    #         self._oauth_session = OAuth2Session(
-    #             self._client_id,
-    #             redirect_uri=self._redirect_uri,
-    #             # code_challenge_method="S256",
-    #             auto_refresh_url=self._token_url,
-    #             auto_refresh_kwargs={"client_id": self._client_id},
-    #             token_updater=self._save_token,
-    #             pkce="S256",
-    #         )
-    #         authorization_url, state = self._oauth_session.authorization_url(
-    #             self._authorize_url
-    #         )
-    #         session["oauth_state"] = state
-    #         print("🔑 Login here:", authorization_url)
-    #         return redirect(authorization_url)
-
-    #     @self._app.route("/callback")
-    #     def callback():
-    #         print(self._oauth_session.token)
-    #         print(self._oauth_session.client_id)
-    #         self._oauth_token = self._oauth_session.fetch_token(
-    #             self._token_url,
-    #             authorization_response=request.url,
-    #             include_client_id=True,
-    #         )
-    #         self._oauth_session.token = self._oauth_token
-    #         self._save_token(self._oauth_token)
-    #         self._shutdown_trigger.set()
-    #         shutdown = request.environ.get("werkzeug.server.shutdown")
-    #         if shutdown:
-    #             shutdown()
-    #         return "Login complete! You can close this tab."
-
-    #     @self._app.route("/__shutdown__")
-    #     def shutdown():
-    #         func = request.environ.get("werkzeug.server.shutdown")
-    #         if func is None:
-    #             raise RuntimeError("Not running with the Werkzeug Server")
-    #         func()
-    #         return "Server shutting down"
-
-
+    def _get_token(self):
+        return self._oauth_token or self._load_token()
 
     def _save_token(self, token):
         self._oauth_token = token
@@ -259,6 +178,18 @@ class OAuthFlow:
             with open(self.token_path) as f:
                 return json.load(f)
         return None
+
+    def _refresh_token(self, token):
+        if not token or "refresh_token" not in token:
+            raise RuntimeError("No refresh token available. Please re-authenticate.")
+        self._oauth_session.token = token
+        new_token = self._oauth_session.refresh_token(
+            self._token_url, refresh_token=token["refresh_token"]
+        )
+        self._save_token(new_token)
+        self._oauth_token = new_token
+        logger.info("Salesforce token refreshed.")
+        return new_token
 
     def _delete_token(self) -> bool:
         if self._oauth_token:
