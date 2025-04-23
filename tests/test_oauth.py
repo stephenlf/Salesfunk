@@ -53,7 +53,7 @@ def test_run_mocked(flow: OAuthFlow):
     ):
         mock_load.return_value = False
         mock_run.return_value = fake_token
-        token = flow._get_token()
+        token = flow.get_token()
         mock_load.assert_called_once()
         mock_run.assert_called_once()
         assert token == fake_token
