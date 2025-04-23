@@ -1,5 +1,5 @@
 [project]
-name = "salesfunk"
+name = "sf_oauth"
 version = "0.1.0"
 description = "ETL/dataframe toolkit for Salesforce built on top of simple-salesforce"
 readme = "README.md"
