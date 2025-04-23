@@ -14,7 +14,7 @@ from requests_oauthlib import OAuth2Session
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
-class OAuthClient:
+class OAuthFlow:
     alias: None
 
     def __init__(
@@ -22,7 +22,7 @@ class OAuthClient:
         instance_url: str = "https://login.salesforce.com",
         port: int = 5000,
         alias: str = None,
-        salesfunk_path: Path = (Path.home() / ".salesfunk"),
+        token_storage_path: Path = (Path.home() / ".sf-oauth"),
         client_id: str = os.getenv("SF_CLIENT_ID"),
         refresh_interval_mili: float = 3600 * 1000,  # 1 hour, configurable in the Salesforce connected app
     ):
@@ -42,7 +42,7 @@ class OAuthClient:
         self.port = port
         self._instance_url = instance_url.rstrip("/")
         self.alias = alias
-        self.salesfunk_path = salesfunk_path
+        self.salesfunk_path = token_storage_path
         self.refresh_interval_mili = refresh_interval_mili
 
         self._oauth_session: OAuth2Session = OAuth2Session(
